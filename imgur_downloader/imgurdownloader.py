@@ -135,7 +135,8 @@ class ImgurDownloader:
         if authfile:
             authstr = authfile.readline().splitlines()[0]
             # .decode('utf-8').splitlines()[0]
-            print ("authautologin: " + authstr)
+            if self.debug:
+                print ("authautologin: " + authstr)
             cookies = dict(authautologin=authstr)
             authfile.close()
 
