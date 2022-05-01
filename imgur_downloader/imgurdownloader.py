@@ -27,6 +27,9 @@ import urllib.request
 import unicodedata
 import click
 
+# for authentication, which imgur now requires for certain albums.
+# for now, the auth key is hardcoded down below (look for 'authautologin').
+import requests
 
 __doc__ = """
 Quickly and easily download images from Imgur.
@@ -121,23 +124,38 @@ class ImgurDownloader:
 
         imgur_url = self.get_all_format_url(imgur_url)
         # e.g.: imgur.com/a/p5wLR -> imgur.com/a/p5wLR/all
+        authfile = None
+        authstr = ""
+        cookies=dict()
         try:
-            self.response = urllib.request.urlopen(url=imgur_url)
-            response_code = self.response.getcode()
+            authfile = open(os.path.expanduser('~') + "/.imgurdl-auth", "rt")
         except Exception as e:
-            self.response = False
-            try:
-                response_code = e.code
-            except AttributeError:
-                raise e
+            authfile = None
 
-        if not self.response or self.response.getcode() != 200:
+        if authfile:
+            authstr = authfile.readline().splitlines()[0]
+            # .decode('utf-8').splitlines()[0]
+            print ("authautologin: " + authstr)
+            cookies = dict(authautologin=authstr)
+            authfile.close()
+
+        if not authstr:
+            print("Warning: No authautologin cookie value was provided.")
+            print("As a result, some galleries may fail to download if they require a login.")
+            print("To fix this, make a file in your home directory called '.imgurdl-auth' and")
+            print("put the value of your 'authautologin' cookie inside it on the first line.")
+
+        self.response=requests.get(imgur_url,cookies=cookies)
+#            self.response = urllib.request.urlopen(url=imgur_url)
+        response_code = self.response.status_code
+        if not self.response or self.response.status_code != 200:
             raise ImgurException("[ImgurDownloader] HTTP Response Code %d"
                                  % response_code)
 
         # Read in the images now so we can get stats and stuff:
-        html = self.response.read().decode('utf-8')
-
+#        html = self.response.read().decode('utf-8')
+        html=self.response.text
+#        print(self.response.text)
         # default album_title
         self.album_title = self.main_key
         if file_name == '':
