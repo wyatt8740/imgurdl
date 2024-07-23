@@ -31,6 +31,15 @@ import click
 # for now, the auth key is hardcoded down below (look for 'authautologin').
 import requests
 
+# user-agent used to grab the webpage containing our images
+agent="Mozilla/5.0 (X11; Linux x86_64; rv:116.0) Gecko/20100101 Firefox/116.0"
+
+# user-agent used for actually downloading individual images.
+# historically imgur has behaved better about not serving up HTML pages
+# containing an image if i use the wget user agent, but it is 429 erroring
+# on the python requests and urllib ones
+agent_imgDL="Wget/1.21.3"
+
 __doc__ = """
 Quickly and easily download images from Imgur.
 
@@ -127,6 +136,7 @@ class ImgurDownloader:
         authfile = None
         authstr = ""
         cookies=dict()
+        headers={ "user-agent" : agent }
         try:
             authfile = open(os.path.expanduser('~') + "/.imgurdl-auth", "rt")
         except Exception as e:
@@ -137,7 +147,7 @@ class ImgurDownloader:
             # .decode('utf-8').splitlines()[0]
             if self.debug:
                 print ("authautologin: " + authstr)
-            cookies = dict(authautologin=authstr)
+            cookies = dict(authautologin=authstr,frontpagebetav2="0",postpagebeta="0",postpagebetalogged="0",frontpagebeta="0")
             authfile.close()
 
         if not authstr:
@@ -146,7 +156,7 @@ class ImgurDownloader:
             print("To fix this, make a file in your home directory called '.imgurdl-auth' and")
             print("put the value of your 'authautologin' cookie inside it on the first line.")
 
-        self.response=requests.get(imgur_url,cookies=cookies)
+        self.response=requests.get(imgur_url,cookies=cookies,headers=headers)
 #            self.response = urllib.request.urlopen(url=imgur_url)
         response_code = self.response.status_code
         if not self.response or self.response.status_code != 200:
@@ -374,8 +384,10 @@ class ImgurDownloader:
                 raise FileExistsError(
                     '%s already exists.' % os.path.basename(path))
 
-            request = urllib.request.urlopen(image_url)
-            redirect_url = request.geturl()
+            # i get 429 errors if i don't supply a user agent it likes
+            headers={ "user-agent" : agent }
+            request=requests.get(image_url, headers=headers, stream=True)
+            redirect_url = request.url
 
             # check if image did not exist and url got redirected
             if image_url != redirect_url:
@@ -385,15 +397,18 @@ class ImgurDownloader:
                     raise HTTPError(
                         404, "Image redirected to non-image link",
                         redirect_url, None, None)
+            request.raise_for_status() # show bad response codes
 
             # check if image is imgur dne image before we download anything
+            # W: how do we not download anything while also checking file contents, exactly??
             if self.delete_dne:
                 try:
-                    with open(self.dne_path, 'rb') as dne_file:
-                        if are_files_equal(request, dne_file):
-                            if self.debug:
-                                print('[ImgurDownloader] DNE: %s' %
-                                      path.split('/')[-1])
+                    if(redirect_url == 'https://i.imgur.com/removed.png'):
+                    # with open(self.dne_path, 'rb') as dne_file:
+                    #    if are_files_equal(request, dne_file):
+                    #        if self.debug:
+                    #            print('[ImgurDownloader] DNE: %s' %
+                    #                  path.split('/')[-1])
                             return 0, 1
                 except (FileNotFoundError, OSError):
                     if self.debug:
@@ -401,9 +416,11 @@ class ImgurDownloader:
                               'found at {}'.format(self.dne_path))
 
             # proceed with downloading
-            urllib.request.urlretrieve(image_url, path)
+            with open(path, 'wb') as f:
+                for chunk in request.iter_content(chunk_size=256):
+                    f.write(chunk)
             dl = 1
-        except (HTTPError, FileExistsError):
+        except (requests.exceptions.HTTPError, HTTPError, FileExistsError):
             skp = 1
         return dl, skp
 
